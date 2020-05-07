@@ -11,18 +11,21 @@
 3. Gratitude
 4. Motivation
 5. Architecture
+
     5.1. RISC
     5.2. Load/Store
     5.3. Pipelining
     5.4. Endianness: the NUXI problem
     5.5. Traps
 6. Shellcodes
+
     6.1. Basic Exec shellcode
     6.2. Bind shellcode
         6.2.1. SPARC Stack
         6.2.2. Optimization
     6.3. Client shellcode (connect-back)
     6.4. Obfuscated shellcode (polymorphic)
+
 7. End words
 
 ## Bibliography
