@@ -1,8 +1,10 @@
-# Linux **SPARC** Shellcodes
+# Linux SPARC Shellcodes
 
-"The number of UNIX installations has grown to 10, with more expected."
+> "The number of UNIX installations has grown to 10, with more expected."
 
 (The *UNIX Programmer's Manual*, 2nd Edition, June, 1972)
+
+## TOC
 
 1. Bibliography
 2. License
@@ -28,31 +30,31 @@
 I consider important to expose as a first point the bibliography used as support to write this document, so the reader can quickly check the links provided or can purchase the referenced books. In this way, it will also help the reader to know what she will find in this text.
 
 - SPARC Architecture, Assembly Language Programming, and C, 2nd Ed.
-    Richard P. Paul 1994, 2000 -Prentice Hall
-    ISBN 0-13-025596-3
+    - Richard P. Paul 1994, 2000 -Prentice Hall
+    - ISBN 0-13-025596-3
 
 - The SPARC Architecture Manual, version 9
-    David L. Weaver / Tom Germond, 1994 -Prentice Hall
-    ISBN 0-13-099227-5
+    - David L. Weaver / Tom Germond, 1994 -Prentice Hall
+    - ISBN 0-13-099227-5
 
 - SPARC Assembly Language Reference Manual
-    http://www.cs.umu.se/kurser/5DV074/HT07/mom2/816-1681.pdf
+    - http://www.cs.umu.se/kurser/5DV074/HT07/mom2/816-1681.pdf
 
 - Intel 64 and IA-32 Intel Architecture Software Developer's Manual, Vol 1
-    Intel, 1997-2002 -Intel
-    Not a joke, it's quite handy
+    - Intel, 1997-2002 -Intel
+    - Not a joke, it's quite handy
 
 - System V Application Binary Interface, SPARC Processor Suplement, 3rd Ed
-    http://www.sparc.org/standards/psABI3rd.pdf
+    - http://www.sparc.org/standards/psABI3rd.pdf
 
 - Phrack
 
 - NetSearch
 
-## License
+## (original) License (now GPL v3)
 
-"THE BEER-WARE LICENSE" (Revision 42):
-<coder/A/fluzo/D/org> wrote this file. As long as you retain this notice you can do whatever you want with this stuff. If we meet some day, and you think this stuff is worth it, you can buy me a beer in return. Javier Barrio
+*"THE BEER-WARE LICENSE" (Revision 42):
+Javier Barrio wrote this file. As long as you retain this notice you can do whatever you want with this stuff. If we meet some day, and you think this stuff is worth it, you can buy me a beer in return.*
 
 ## Motivation
 
@@ -68,7 +70,7 @@ There are many documents explaining the creation of shellcodes. At Phrack they d
 + To Overdrive and Zosen, for special reasons.
 + On the top of the world: QSR.
 + To Richard W. Stevens, Jon B. Postel, Ken Thompson, Brian W. Kernighan, Dennis Ritchie and Mel because they are the real computer magicians.
-+ Too all usual suspects. They know who they are.
++ To all usual suspects. They know who they are.
 
 ## Architecture
 
@@ -93,3 +95,26 @@ Some of the improvements that were included in the 9th version of SPARC over the
 - Big and little-endian support
 
 Also important to mention its total backwards compatibility with its predecessor version.
+
+### Load/Store
+
+It is common to say that SPARC is a 'Load/Store' architecture. This means that when you need to work with a datum that is residing in memory, it has to be temporary stored 'somewhere else' before it can be used by the CPU to perform the needed operations. And which is this place? A register. Or to be more precise, a register file.
+
+A register file is like an integrated circuit which is used as a special RAM, storing data or addresses readed from memory. This lazy ASCII illustration tries to give an idea of the concept:
+
+        ---------------------              --------------
+        |                   |              |------------| M
+      C |                   |              |------------| E
+        |       -------     |   -------->  |------------| M
+        |  -->  | alu | --- |              |------------| O
+      P |  |    -------   | |              |------------| R
+        |  |              | |   <--------  |------------| Y
+        |  |  ----------  | |              |------------|
+      U |  |  |register|<_| |              --------------
+        |  |__|  file  |    |
+        |     ----------    |
+        |                   |
+        ---------------------
+
+This is an incomplete schema, but I hope it can help to illustrate how a Load/Store architecture works. Not to be confused with the memory stack -in which the data is stored- used, for instance, when calling a subroutine using the 'call' instruction (like a calculator). In a RISC machine data or memory addresses go from memory to the registers and on them is where the ALU, FPU or other units operate. In a Load/Store design, the CPU performs a `load` from a register or a `store` in a register, and this is part of the file register.
+
