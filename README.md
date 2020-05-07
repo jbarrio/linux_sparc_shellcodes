@@ -11,21 +11,18 @@
 3. Gratitude
 4. Motivation
 5. Architecture
-
     5.1. RISC
     5.2. Load/Store
     5.3. Pipelining
     5.4. Endianness: the NUXI problem
     5.5. Traps
 6. Shellcodes
-
     6.1. Basic Exec shellcode
     6.2. Bind shellcode
         6.2.1. SPARC Stack
         6.2.2. Optimization
     6.3. Client shellcode (connect-back)
     6.4. Obfuscated shellcode (polymorphic)
-
 7. End words
 
 ## Bibliography
@@ -121,3 +118,46 @@ A register file is like an integrated circuit which is used as a special RAM, st
 
 This is an incomplete schema, but I hope it can help to illustrate how a Load/Store architecture works. Not to be confused with the memory stack -in which the data is stored- used, for instance, when calling a subroutine using the 'call' instruction (like a calculator). In a RISC machine data or memory addresses go from memory to the registers and on them is where the ALU, FPU or other units operate. In a Load/Store design, the CPU performs a `load` from a register or a `store` in a register, and this is part of the file register.
 
+### Pipelining
+
+Pipelining may look like not directly related to the current topic, but I believe it can be interesting to speak about it here because of how it can influenciate the i-cache in the execution of instructions, as we will see in section 6.4.
+
+The cycle described by Neumann, in the case of a RISC architecture, is comprised by four steps:
+
+- instruction fetch
+- execute
+- memory access
+- store result
+
+By having four isolated and apparently independent components, when an instruction is decoded and jumps to the next stage in the pipeline, another instruction can be fetched and decoded without needing to wait before the first one has been executed. The most basic example that normally is used gives a clear idea about the advantages of using pipelines, as the speed increases *a lot:*
+
+In an execution **without** pipeline, we would get the result of executing two instructions after 8 clock cycles, while in the case of a 'pipelined' design we would execute 4 instructions within the same time:
+
+          --------------------------------
+          |F | E | M | W | F | E | M | W |
+          --------------------------------
+        execution without pipeline: 2 instructions, 8 clock cycles
+
+          ----------------
+          |F | E | M | W |
+          --------------------
+             | F | E | M | W |
+             --------------------
+                 | F | E | M | W |
+                 ---------------------
+                     | F | E | M | W |
+                     -----------------
+        execution without pipeline: 4 instructions, 7 clock cycles
+
+This design favors, as it can be observed in the above figure, the execution of instructions in parallel and, thus, the performance impact is bigger, but it comes with two caveats: the first one is the load of instructions and the second one is the concept known as 'branching', which will be covered in the next paragraphs.
+
+Keeping in mind previous schema, if the processor is given the following instructions:
+
+``
+    ld  [%o0], %o1
+    sub %o1, %o2, %o3
+``
+
+When it does the ``load`` and gets the datum from memory, it would be performing the substraction **at the same time** and thus, being a parallel execution, the datum loaded could not be the expected one. The processor can detect this and wait a clock cycle before getting the right value, but then it will be wasting resources. This is where the compiler optimization comes in place, as it was mentioned before, putting in its hands the decision of inserting between these two instructions a third one that doesn't affect the the substraction and allows to not waste the CPU cycle. This is known as 'load delay slot'.
+
+The second issue, known as the 'branching delay slot', occurs when an instruction modifies the programme flux. For instance, a ``call`` instruction to execute a subroutine *is* a branching delay slot. What happens in this case is that the processor is not capable of waiting a cycle by itself and executes the next instruction. This, like in the previous case, instead of being a problem, can be used as an advantage to optimize code to its maximum, but as usual this is also in the hands of the programmer and, as nowadays assembler is not a widely used language, it is a task carried almost exclusively by the compiler. Nevertheless, maybe the reader understands know why we can find lots of NOP instructions in lots of codes *just after a* ``call``, emulating how the CPU behaves in the case of the load delay slot. Maybe in lieu of a NOP we could assign a value to an output register that will be used by the callee function and thus, not wasting the cycle.
