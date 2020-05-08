@@ -153,10 +153,8 @@ This design favors, as it can be observed in the above figure, the execution of 
 
 Keeping in mind previous schema, if the processor is given the following instructions:
 
-``
-    ld  [%o0], %o1
-
-    sub %o1, %o2, %o3
+``ld  [%o0], %o1
+sub %o1, %o2, %o3
 ``
 
 When it does the ``load`` and gets the datum from memory, it would be performing the substraction **at the same time** and thus, being a parallel execution, the datum loaded could not be the expected one. The processor can detect this and wait a clock cycle before getting the right value, but then it will be wasting resources. This is where the compiler optimization comes in place, as it was mentioned before, putting in its hands the decision of inserting between these two instructions a third one that doesn't affect the the substraction and allows to not waste the CPU cycle. This is known as 'load delay slot'.
