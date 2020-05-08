@@ -154,7 +154,7 @@ This design favors, as it can be observed in the above figure, the execution of 
 Keeping in mind previous schema, if the processor is given the following instructions:
 
 <code>
-  ld  [%o0], %o1
+  ld  [%o0], %o1<br/>
   sub %o1, %o2, %o3
 </code>
 
