@@ -11,18 +11,18 @@
 3. Gratitude
 4. Motivation
 5. Architecture
-    5.1. RISC
-    5.2. Load/Store
-    5.3. Pipelining
-    5.4. Endianness: the NUXI problem
-    5.5. Traps
+    1. RISC
+    2. Load/Store
+    3. Pipelining
+    4. Endianness: the NUXI problem
+    5. Traps
 6. Shellcodes
-    6.1. Basic Exec shellcode
-    6.2. Bind shellcode
-        6.2.1. SPARC Stack
-        6.2.2. Optimization
-    6.3. Client shellcode (connect-back)
-    6.4. Obfuscated shellcode (polymorphic)
+    1. Basic Exec shellcode
+    2. Bind shellcode
+        1. SPARC Stack
+        2. Optimization
+    3. Client shellcode (connect-back)
+    4. Obfuscated shellcode (polymorphic)
 7. End words
 
 ## Bibliography
@@ -155,6 +155,7 @@ Keeping in mind previous schema, if the processor is given the following instruc
 
 ``
     ld  [%o0], %o1
+
     sub %o1, %o2, %o3
 ``
 
