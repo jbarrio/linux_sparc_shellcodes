@@ -15,7 +15,7 @@
     2. Load/Store
     3. Pipelining
     4. Endianness: the NUXI problem
-    5. Traps
+    5. [Traps](### Traps)
 6. Shellcodes
     1. Basic Exec shellcode
     2. Bind shellcode
