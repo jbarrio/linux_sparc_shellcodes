@@ -153,11 +153,60 @@ This design favors, as it can be observed in the above figure, the execution of 
 
 Keeping in mind previous schema, if the processor is given the following instructions:
 
-<code>
-  ld  [%o0], %o1<br/>
-  sub %o1, %o2, %o3
-</code>
+```
+ld  [%o0], %o1
+sub %o1, %o2, %o3
+```
 
 When it does the ``load`` and gets the datum from memory, it would be performing the substraction **at the same time** and thus, being a parallel execution, the datum loaded could not be the expected one. The processor can detect this and wait a clock cycle before getting the right value, but then it will be wasting resources. This is where the compiler optimization comes in place, as it was mentioned before, putting in its hands the decision of inserting between these two instructions a third one that doesn't affect the the substraction and allows to not waste the CPU cycle. This is known as 'load delay slot'.
 
 The second issue, known as the 'branching delay slot', occurs when an instruction modifies the programme flux. For instance, a ``call`` instruction to execute a subroutine *is* a branching delay slot. What happens in this case is that the processor is not capable of waiting a cycle by itself and executes the next instruction. This, like in the previous case, instead of being a problem, can be used as an advantage to optimize code to its maximum, but as usual this is also in the hands of the programmer and, as nowadays assembler is not a widely used language, it is a task carried almost exclusively by the compiler. Nevertheless, maybe the reader understands know why we can find lots of NOP instructions in lots of codes *just after a* ``call``, emulating how the CPU behaves in the case of the load delay slot. Maybe in lieu of a NOP we could assign a value to an output register that will be used by the callee function and thus, not wasting the cycle.
+
+### Endianness: the NUXI problem
+
+Before it has been shown that one of the features of a RISC architecture is that they are big-endian and that, more specificically, SPARCv9 is big-endian, with the particularity that it is able to read data in little-endian. It is possible to even mix kernel-land in big-endian + userland in little and vice versa.
+
+When UNIX was initially ported to other computers different than the PDP-11, like for instance the mini computer from IBM Series/1, and this port was booted into the Operating System, they observed an anomaly: instead of writing the word UNIX to the screen, the readed word was NUXI. That is, the byte were stored in a reverse way: in an architecture the byte for the 'U' letter from couple 'UN' was stored first as being the most significant one while in the other it happened the contrary; it was the LSB -less significant byte- the one stored first.
+
+It seems that the first person to observe this behavior was a passionate Gulliver reader and gave to this phenomenon 'big-endian' and 'little-endian' to the MSB and LSB respective solutions in a direct allusion to how the liliputians called the parts of an egg.
+
+The following code illustrates this problem:
+
+```
+% uname -sm
+Linux sparc64
+coder@fraga ~ % cat endian.c
+#include <stdio.h>
+
+int main() {
+  long int i = 15;
+  const char *p = (const char *) &i;
+  if (p[0] == 5) {
+    printf ("Little Endian\n");
+  } else {
+      printf ("Big Endian\n");
+    }
+  return (0);
+}
+%
+```
+
+It the above code is compiled and executed in a big-endian design, as the first byte is considered to be more important, it will display the 'Big Endian' message while if executed in a CISC (little-endian) it will show the other message.
+
+```
+% uname -sm ; (gcc endian.c -oendian && ./endian)
+Linux sparc64
+Big Endian
+%
+```
+
+```
+% uname -sm; (gcc endian.c -oendian && ./endian)
+Linux i686
+Little Endian
+%
+```
+
+Maybe the reader can think this can represent an issue when it comes to locate data in memory, for instance the address of /bin/sh, but it is not, as the System knows that it is being executed in a CPU big or little endian and does it transparently. So it seems that a multi architecture shellcode is not possible, but in Phrack magazine they developed ASS...
+
+But there is a case where the byte order can be an issue, and this situation is when interchanging data via networking, and that's the reason of existince of the functions ``htons()`` and ``stohs()``, so data can be sorted upon reception. Note than in a RISC computed ``htons()`` can be ignored because in networking, data travels big-endian.
