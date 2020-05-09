@@ -7,8 +7,8 @@
 ## TOC
 
 1. [Bibliography](#bibliography)
-2. License
-3. Gratitude
+2. [License](#original-license-text-now-gpl-v3)
+3. [Gratitude](#gratitude)
 4. [Motivation](#motivation)
 5. [Architecture](#architecture)
     1. [RISC](#risc)
@@ -241,7 +241,7 @@ And its equivalent in Linux sparc64 would be:
 
 The instruction ``ta`` -trap always- handles the change to supervisor mode unconditionally, but there exist other condtional traps such as ``te`` -trap equal- or ``tn`` -trap never-. The return value from the syscall will be stored in the %o0 register.
 
-### Shellcodes
+## Shellcodes
 
 As per Wikipedia, a shellcode is a piece of machine code embedded as the payload of an exploit to get a shell. This is a reasonable definition but I believe it to be incomplete.
 
