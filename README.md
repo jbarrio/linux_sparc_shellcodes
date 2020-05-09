@@ -175,7 +175,9 @@ The following code illustrates this problem:
 ```
 % uname -sm
 Linux sparc64
-coder@fraga ~ % cat endian.c
+```
+```
+% cat endian.c
 #include <stdio.h>
 
 int main() {
@@ -207,6 +209,34 @@ Little Endian
 %
 ```
 
-Maybe the reader can think this can represent an issue when it comes to locate data in memory, for instance the address of /bin/sh, but it is not, as the System knows that it is being executed in a CPU big or little endian and does it transparently. So it seems that a multi architecture shellcode is not possible, but in Phrack magazine they developed ASS...
+Maybe the reader can think this can represent an issue when it comes to locate data in memory, for instance the address of */bin/sh*, but it is not, as the System knows that it is being executed in a CPU big or little endian and does it transparently. So it seems that a multi architecture shellcode is not possible, but in Phrack magazine they developed ASS...
 
 But there is a case where the byte order can be an issue, and this situation is when interchanging data via networking, and that's the reason of existince of the functions ``htons()`` and ``stohs()``, so data can be sorted upon reception. Note than in a RISC computed ``htons()`` can be ignored because in networking, data travels big-endian.
+
+### Traps
+
+Using the previous code example to check in which order the microprocessor stores the data, we can oberve the call to the function ``printf()``. If we digg deeper, we find that such function is a wrapper and that in the end, who writes in the screen is the Linux kernel, and that it does that by the use of a system call, ``write()``. As the reader may already know, in order to execute a syscall, we need to change the execution mode. In SPARC there are two execution modes: supervisor and user (think of ring0/ring3 in IA-32), being the former 'kernel territory' while the latter is the one where all programms we execute do reside.
+
+SPARC microprocessors use traps as a unified mechanism to handle both syscalls and exceptions but also interruptions. A trap in SPARC is a *procedure call* which is invoked both in synchronous and asynchronous exceptions as well as traps initiated by software and for device-generated interruptions.
+
+In SPARC, to perform a *context switch* and change from user mode to supervisor mode, we use a trap. Maybe the reader knows how this works in the IA-32 architecture, in which to change from ring3 to ring0, the system executes the ``int`` instruction, which generates a software interrupt, specificically ``int 0x80``. The concept works almost identically in Linux sparc64, but obviously both the registers and the instructions do change. The necessary assembler to execute a call to ``sys_write()`` that will print the digit '1' on the screen in IA-32 would be this:
+
+```
+    mov $0x0, %ebx
+    mov $dir, %ecx
+    mov $0x1, %edx
+    mov $0x4, %eax
+    int 0x80
+```
+
+And its equivalent in Linux sparc64 would be:
+
+```
+    mov 0,    %o0
+    mov $dir, %o1
+    mov 1,    %o2
+    mov 4,    %g1
+    ta       0x90
+```
+
+The instruction ``ta`` -trap always- handles the change to supervisor mode unconditionally, but there exist other condtional traps such as ``te`` -trap equal- or ``tn`` -trap never-. The return value from the syscall will be stored in the %o0 register.
