@@ -17,13 +17,13 @@
     4. [5.4. Endianness: the NUXI problem](#54-endianness-the-nuxi-problem)
     5. [5.5. Traps](#55-traps)
 6. [Shellcodes](#6-shellcodes)
-    1. [Basic Exec shellcode](#61-basic-exec-shellcode)
-    2. [Bind shellcode](#bind-shellcode)
-        1. [SPARC Stack](#sparc-stack)
-        2. [Optimization](#optimization)
-    3. Client shellcode (connect-back)
-    4. Obfuscated shellcode (polymorphic)
-7. End words
+    1. [6.1. Basic Exec shellcode](#61-basic-exec-shellcode)
+    2. [6.2. Bind shellcode](#62-bind-shellcode)
+        1. [6.2.1. SPARC Stack](#621-sparc-stack)
+        2. [6.2.2 Optimization](#622-optimization)
+    3. [6.3. Client shellcode (connect-back)](#63-client-shellcode-connect-back)
+    4. [6.4. Obfuscated shellcode (polymorphic)](#64-obfuscated-shellcode-polymorphic)
+7. [End words](#7-end-words)
 
 ## 1. Bibliography
 
