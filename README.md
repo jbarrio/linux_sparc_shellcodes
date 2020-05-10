@@ -6,18 +6,18 @@
 
 ## TOC
 
-1. [Bibliography](#bibliography)
-2. [License](#original-license-text-now-gpl-v3)
-3. [Gratitude](#gratitude)
-4. [Motivation](#motivation)
-5. [Architecture](#architecture)
-    1. [RISC](#risc)
-    2. [Load/Store](#loadstore)
-    3. [Pipelining](#pipelining)
-    4. [Endianness: the NUXI problem](#endianness-the-nuxi-problem)
-    5. [Traps](#traps)
-6. [Shellcodes](#shellcodes)
-    1. [Basic Exec shellcode](#basic-exec-shellcode)
+1. [Bibliography](#1-bibliography)
+2. [License](#2-original-license-text-now-gpl-v3)
+3. [Gratitude](#3-gratitude)
+4. [Motivation](#4-motivation)
+5. [Architecture](#5-architecture)
+    1. [5.1. RISC](#51-risc)
+    2. [5.2. Load/Store](#52-loadstore)
+    3. [5.3. Pipelining](#53-pipelining)
+    4. [5.4. Endianness: the NUXI problem](#54-endianness-the-nuxi-problem)
+    5. [5.5. Traps](#55-traps)
+6. [Shellcodes](#6-shellcodes)
+    1. [Basic Exec shellcode](#61-basic-exec-shellcode)
     2. [Bind shellcode](#bind-shellcode)
         1. [SPARC Stack](#sparc-stack)
         2. [Optimization](#optimization)
@@ -25,7 +25,7 @@
     4. Obfuscated shellcode (polymorphic)
 7. End words
 
-## Bibliography
+## 1. Bibliography
 
 I consider important to expose as a first point the bibliography used as support to write this document, so the reader can quickly check the links provided or can purchase the referenced books. In this way, it will also help the reader to know what she will find in this text.
 
@@ -51,16 +51,16 @@ I consider important to expose as a first point the bibliography used as support
 
 - NetSearch
 
-## (original) License text (now GPL v3)
+## 2. (original) License text (now GPL v3)
 
 *"THE BEER-WARE LICENSE" (Revision 42):
 Javier Barrio wrote this file. As long as you retain this notice you can do whatever you want with this stuff. If we meet some day, and you think this stuff is worth it, you can buy me a beer in return.*
 
-## Motivation
+## 3. Motivation
 
 There are many documents explaining the creation of shellcodes. At Phrack they don't even accept any more articles on this matter. However, it is the right time to help relaunch the (NetSearch) ezine with a text that covers a gap, the shellcodes in Linux SPARC in Spanish (original version), as well as deepen the knowledge of the CPU -mainly v9- and understand its assembler.
 
-## Gratitude
+## 4. Gratitude
 
 + Sic transit gloria mundi, rwlock_t.
 + To my 48bits fellows and friends, for publishing this article.
@@ -72,13 +72,13 @@ There are many documents explaining the creation of shellcodes. At Phrack they d
 + To Richard W. Stevens, Jon B. Postel, Ken Thompson, Brian W. Kernighan, Dennis Ritchie and Mel because they are the real computer magicians.
 + To all usual suspects. They know who they are.
 
-## Architecture
+## 5. Architecture
 
 The SPARC architecture -Scalable Processor ARChitecture- is a CPU that was designed originally by SUN Microsystems in 1985. It was based on the first RISC designs from both IBM and Berkeley from the beginning of the eighties, emphasizing a minimalistic instruction set -opcodes- with the ability of being executed at high speeds.
 
 It is a trully open non-proprietary architecture which comercial brand was established in 1989 when the SPARC International Inc. organisation was created, when they gave licenses to build the chips to companies like Fujitsu, Texas or, of course, SUN.
 
-### RISC
+### 5.1. RISC
 
 Reduced Instruction Set Computers design dates back more than 25 years in time, with three main characteristics: ability to address 32 bits, execution of one instruction per cycle and system load / restore.
 
@@ -96,7 +96,7 @@ Some of the improvements that were included in the 9th version of SPARC over the
 
 Also important to mention its total backwards compatibility with its predecessor version.
 
-### Load/Store
+### 5.2. Load/Store
 
 It is common to say that SPARC is a 'Load/Store' architecture. This means that when you need to work with a datum that is residing in memory, it has to be temporary stored 'somewhere else' before it can be used by the CPU to perform the needed operations. And which is this place? A register. Or to be more precise, a register file.
 
@@ -118,7 +118,7 @@ A register file is like an integrated circuit which is used as a special RAM, st
 
 This is an incomplete schema, but I hope it can help to illustrate how a Load/Store architecture works. Not to be confused with the memory stack -in which the data is stored- used, for instance, when calling a subroutine using the 'call' instruction (like a calculator). In a RISC machine data or memory addresses go from memory to the registers and on them is where the ALU, FPU or other units operate. In a Load/Store design, the CPU performs a `load` from a register or a `store` in a register, and this is part of the file register.
 
-### Pipelining
+### 5.3. Pipelining
 
 Pipelining may look like not directly related to the current topic, but I believe it can be interesting to speak about it here because of how it can influenciate the i-cache in the execution of instructions, as we will see in section 6.4.
 
@@ -162,7 +162,7 @@ When it does the ``load`` and gets the datum from memory, it would be performing
 
 The second issue, known as the 'branching delay slot', occurs when an instruction modifies the programme flux. For instance, a ``call`` instruction to execute a subroutine *is* a branching delay slot. What happens in this case is that the processor is not capable of waiting a cycle by itself and executes the next instruction. This, like in the previous case, instead of being a problem, can be used as an advantage to optimize code to its maximum, but as usual this is also in the hands of the programmer and, as nowadays assembler is not a widely used language, it is a task carried almost exclusively by the compiler. Nevertheless, maybe the reader understands know why we can find lots of NOP instructions in lots of codes *just after a* ``call``, emulating how the CPU behaves in the case of the load delay slot. Maybe in lieu of a NOP we could assign a value to an output register that will be used by the callee function and thus, not wasting the cycle.
 
-### Endianness: the NUXI problem
+### 5.4. Endianness: the NUXI problem
 
 Before it has been shown that one of the features of a RISC architecture is that they are big-endian and that, more specificically, SPARCv9 is big-endian, with the particularity that it is able to read data in little-endian. It is possible to even mix kernel-land in big-endian + userland in little and vice versa.
 
@@ -213,7 +213,7 @@ Maybe the reader can think this can represent an issue when it comes to locate d
 
 But there is a case where the byte order can be an issue, and this situation is when interchanging data via networking, and that's the reason of existince of the functions ``htons()`` and ``stohs()``, so data can be sorted upon reception. Note than in a RISC computed ``htons()`` can be ignored because in networking, data travels big-endian.
 
-### Traps
+### 5.5. Traps
 
 Using the previous code example to check in which order the microprocessor stores the data, we can oberve the call to the function ``printf()``. If we digg deeper, we find that such function is a wrapper and that in the end, who writes in the screen is the Linux kernel, and that it does that by the use of a system call, ``write()``. As the reader may already know, in order to execute a syscall, we need to change the execution mode. In SPARC there are two execution modes: supervisor and user (think of ring0/ring3 in IA-32), being the former 'kernel territory' while the latter is the one where all programms we execute do reside.
 
@@ -241,7 +241,7 @@ And its equivalent in Linux sparc64 would be:
 
 The instruction ``ta`` -trap always- handles the change to supervisor mode unconditionally, but there exist other condtional traps such as ``te`` -trap equal- or ``tn`` -trap never-. The return value from the syscall will be stored in the %o0 register.
 
-## Shellcodes
+## 6. Shellcodes
 
 As per [Wikipedia](https://en.wikipedia.org/wiki/Shellcode), a shellcode is a piece of machine code embedded as the payload of an exploit to get a shell. This is a reasonable definition but I believe it to be incomplete.
 
